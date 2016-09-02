@@ -26,6 +26,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * @param <T> event to be processed by a pool of workers
  */
+// 封装了ringBuffer和多个consumer,consumer的个数与提供的workHandler个数有关,start的时候会返回ringBuffer给外部的producer线程使用
+// 由外部提供的executor提供线程支持,每个workProcessor使用一个线程执行,多个workProcessor共享一个ringBuffer,但是完全是lock-free的
+// 类似于newFixedThreadPool
 public final class WorkerPool<T>
 {
     private final AtomicBoolean started = new AtomicBoolean(false);
@@ -149,6 +152,7 @@ public final class WorkerPool<T>
         Sequence[] workerSequences = getWorkerSequences();
         while (ringBuffer.getCursor() > Util.getMinimumSequence(workerSequences))
         {
+            // 等待consumer将队列中的数据处理完
             Thread.yield();
         }
 
@@ -165,6 +169,7 @@ public final class WorkerPool<T>
      */
     public void halt()
     {
+        // 不等待队列中的数据处理完
         for (WorkProcessor<?> processor : workProcessors)
         {
             processor.halt();

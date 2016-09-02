@@ -20,6 +20,8 @@ import sun.misc.Unsafe;
 import com.lmax.disruptor.util.Util;
 
 
+// cacheline优化, cacheline一般都是32-128字节,由于Sequence的读写操作非常频繁,所以希望是长时间保存在cacheline中,这样不会因为value
+// 跟其他可变数据保存在一个cacheline中而导致被动cache失效
 class LhsPadding
 {
     protected long p1, p2, p3, p4, p5, p6, p7;

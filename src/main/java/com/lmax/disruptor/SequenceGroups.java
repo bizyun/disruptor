@@ -15,9 +15,9 @@
  */
 package com.lmax.disruptor;
 
-import static java.util.Arrays.copyOf;
-
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+
+import static java.util.Arrays.copyOf;
 
 /**
  * Provides static methods for managing a {@link SequenceGroup} object.
@@ -43,12 +43,14 @@ class SequenceGroups
             int index = currentSequences.length;
             for (Sequence sequence : sequencesToAdd)
             {
+                // 新加的gatingSequence都初始化为cursorSequence, 作为新加的消费者的起始点
                 sequence.set(cursorSequence);
                 updatedSequences[index++] = sequence;
             }
         }
         while (!updater.compareAndSet(holder, currentSequences, updatedSequences));
 
+        // 优化措施,尽量减少新加进来的consumer对producer或者其它consumer的block
         cursorSequence = cursor.getCursor();
         for (Sequence sequence : sequencesToAdd)
         {

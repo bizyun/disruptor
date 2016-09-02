@@ -73,7 +73,7 @@ public final class BatchEventProcessor<T>
     public void halt()
     {
         running.set(false);
-        sequenceBarrier.alert();
+        sequenceBarrier.alert(); // 中断可能的consumer阻塞
     }
 
     @Override
@@ -121,9 +121,12 @@ public final class BatchEventProcessor<T>
             {
                 try
                 {
+                    // Sequence和sequenceBarrier的抽象感觉很nb啊,基于这个抽象,consumer可以实现各种依赖关系
+                    // 对于consumer来说,它就是基于barrier来确定可以消费的数据的,至于依赖的关系拓扑结构它并不需要了解,全部都隐藏在
+                    // 具体提供的barrier中。而barrier也仅仅是基于Sequence的抽象就能实现拓扑依赖,从而使得拓扑关系的实现非常简单
                     final long availableSequence = sequenceBarrier.waitFor(nextSequence);
 
-                    while (nextSequence <= availableSequence)
+                    while (nextSequence <= availableSequence) // 如果nextSequence=4,但是producer只是在4上占用了slot,还没有publish,则返回的availableSequence会比NEXSequence小
                     {
                         event = dataProvider.get(nextSequence);
                         eventHandler.onEvent(event, nextSequence, nextSequence == availableSequence);
@@ -136,7 +139,7 @@ public final class BatchEventProcessor<T>
                 {
                     notifyTimeout(sequence.get());
                 }
-                catch (final AlertException ex)
+                catch (final AlertException ex) // 被halt之后,barrier会检查下alert并抛出这个异常
                 {
                     if (!running.get())
                     {
@@ -196,7 +199,7 @@ public final class BatchEventProcessor<T>
      */
     private void notifyShutdown()
     {
-        if (eventHandler instanceof LifecycleAware)
+        if (eventHandler instanceof LifecycleAware) // 通过接口类型来确定eventHandler是否需要处理启动和关闭事件
         {
             try
             {
@@ -204,7 +207,7 @@ public final class BatchEventProcessor<T>
             }
             catch (final Throwable ex)
             {
-                exceptionHandler.handleOnShutdownException(ex);
+                exceptionHandler.handleOnShutdownException(ex); // 健壮的代码总是提供各种异常处理接口
             }
         }
     }

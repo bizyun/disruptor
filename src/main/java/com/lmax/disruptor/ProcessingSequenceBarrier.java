@@ -60,6 +60,7 @@ final class ProcessingSequenceBarrier implements SequenceBarrier
             return availableSequence;
         }
 
+        // 如果Sequence和availableSequence都是还没有publish的,则返回的是Sequence-1的值
         return sequencer.getHighestPublishedSequence(sequence, availableSequence);
     }
 
@@ -79,6 +80,7 @@ final class ProcessingSequenceBarrier implements SequenceBarrier
     public void alert()
     {
         alerted = true;
+        // 由于consumer可能使用的是可阻塞的waitStrategy,所以需要通过信号中断阻塞(很多是基于等待条件变量阻塞的)
         waitStrategy.signalAllWhenBlocking();
     }
 

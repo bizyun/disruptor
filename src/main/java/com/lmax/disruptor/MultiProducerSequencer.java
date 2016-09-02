@@ -15,11 +15,10 @@
  */
 package com.lmax.disruptor;
 
-import java.util.concurrent.locks.LockSupport;
-
+import com.lmax.disruptor.util.Util;
 import sun.misc.Unsafe;
 
-import com.lmax.disruptor.util.Util;
+import java.util.concurrent.locks.LockSupport;
 
 
 /**
@@ -124,21 +123,21 @@ public final class MultiProducerSequencer extends AbstractSequencer
             current = cursor.get();
             next = current + n;
 
-            long wrapPoint = next - bufferSize;
+            long wrapPoint = next - bufferSize; // producer 的Sequence与consumer的Sequence不应该超过buffersize大小
             long cachedGatingSequence = gatingSequenceCache.get();
 
             if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current)
             {
                 long gatingSequence = Util.getMinimumSequence(gatingSequences, current);
 
-                if (wrapPoint > gatingSequence)
+                if (wrapPoint > gatingSequence) // 如果最小的待consume的Sequence都比wrapPoint要大,说明队列已经满了,producer就block
                 {
                     waitStrategy.signalAllWhenBlocking();
                     LockSupport.parkNanos(1); // TODO, should we spin based on the wait strategy?
                     continue;
                 }
 
-                gatingSequenceCache.set(gatingSequence);
+                gatingSequenceCache.set(gatingSequence); // 优化手段,只要队列不满就不用每次都轮询一遍所有的consumer的Sequence
             }
             else if (cursor.compareAndSet(current, next))
             {
@@ -180,6 +179,7 @@ public final class MultiProducerSequencer extends AbstractSequencer
 
             if (!hasAvailableCapacity(gatingSequences, n, current))
             {
+                // 定义一个单例异常,由于队列满的关系这种异常可能会频繁出现,所以这种优化还是很合适的
                 throw InsufficientCapacityException.INSTANCE;
             }
         }
@@ -215,6 +215,10 @@ public final class MultiProducerSequencer extends AbstractSequencer
     @Override
     public void publish(final long sequence)
     {
+        // 由于producer是预占slot的,只有真正将数据写入到ringBuffer中,才能真正的使用该Sequence,所以需要通过设置flag来标记该Sequence可用
+        // 所以可以理解为什么需要检查Sequence的可用性,如果当前可consume的Sequence=3,producer已经将4 5 6 slot都占用了,但是还没有保存数据
+        // 并且publish,而consumer通过waitStrategy此时是能够感知到producer的cursor Sequence的,waitStrategy就会返回一个比如4 5 6其中一个slot的
+        // 但是通过检查可用性会发现这些Sequence都不能用
         setAvailable(sequence);
         waitStrategy.signalAllWhenBlocking();
     }
@@ -290,6 +294,10 @@ public final class MultiProducerSequencer extends AbstractSequencer
 
     private int calculateAvailabilityFlag(final long sequence)
     {
+        // bufferSize = 8, indexShift=3, 这个操作得到的值其实就是ringBuffer已经wrapper了多少次了,初始值都是-1,Sequence从0-7的时候则都是0
+        // 从8-15的时候就都是1,16-23的时候都是2,依次类推
+        // 这样做的目的就是防止错误的Sequence被当做可用的Sequence,比如现在producer的Sequence是9,而其中一个consumer的Sequence还是2,producer现在已经block了
+        // 但是另外一个consumer现在consumer到9了,错误的提供了一个consumer Sequence=10的数据请求,如果不做这个判断的话,就可能会把老的数据给拿去使用了
         return (int) (sequence >>> indexShift);
     }
 
